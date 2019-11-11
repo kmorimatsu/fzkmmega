@@ -1,2 +1,2 @@
 # fzkmmega
-Fuzix-running PC using PIC32MX370F512H
+Template for MachiKania type M application with 80x27 NTSC display

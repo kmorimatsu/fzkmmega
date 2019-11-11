@@ -57,7 +57,7 @@
 		I2C1 not used
 		I2C2 not used
 	
-	ポート使用
+	Port asignment
 		B0  I/O, AN0
 		B1  I/O, AN1
 		B2  I/O, AN2
@@ -114,13 +114,13 @@
 */
 
 #include <xc.h>
-#include "interface/keyinput.h"
-#include "interface/lib_video_megalopa.h"
-#include "interface/ps2keyboard.h"
+#include "api.h"
 #include "main.h"
 
 // Using crystal with PLL (20/3)
 // 3.579545×4＝14.31818MHz
+// CPU clock is 95454533.33 Hz
+// Coretime clock is ~47727267 Hz
 #pragma config FSRSSEL = PRIORITY_7
 #pragma config PMDL1WAY = OFF
 #pragma config IOL1WAY = OFF
@@ -166,8 +166,83 @@ void wait60thsec(unsigned short n){
 	while(drawcount!=n) asm("wait");
 }
 
+int coretimer(void){ 
+	return _CP0_GET_COUNT();
+}
+
+void wait_msec(int msec){
+	int endtime=coretimer()+msec*47727;
+	while(0<(endtime-(int)coretimer()));
+}
+
+unsigned char nextIs(unsigned char* str,int point){
+	unsigned char i;
+	// Skip blank
+	for(i=0;0x20==RAM[point+i];i++);
+	// Check
+	while(str[0]){
+		if (str[0]!=RAM[point+i]) return 0;
+		str++;
+		i++;
+	}
+	// All done
+	return i;
+}
+
+void init_file(void){
+	int i,point,end;
+	unsigned char c;
+	FSFILE* fhandle;
+	// Read ini file to RAM area
+	fhandle=FSfopen("fzkmmega.ini","r");
+	if (!fhandle) return;
+	end=0xbc00+FSfread(&RAM[0xbc00],1,0x2400,fhandle);
+	FSfclose(fhandle);
+	// All Upper cases. 0x0d to 0x0a. Tab to space
+	for(point=0xbc00;point<end;point++){
+		c=RAM[point];
+		if ('a'<=c && c<='z') RAM[point]=c-0x20;
+		else if (0x0d==c) RAM[point]=0x0a;
+		else if (0x09==c) RAM[point]=0x20;
+	}
+	// Explore
+	point=0xbc00;
+	while(point<end){
+		// Check if comment
+		if ('#'!=RAM[point]) {
+			// Check CAPSLOCK
+			if (c=nextIs("NUMLOCK ",point)) {
+				point+=c;
+				if (c=nextIs("ON",point)) {
+					point+=c;
+					lockkey=2;
+				} else if (c=nextIs("OFF",point)) {
+					point+=c;
+					lockkey=0;
+				}
+			// Check DISKFILE
+			} else if (c=nextIs("DISKFILE ",point)) {
+				point+=c;
+				// Skip blank
+				while(point<end && 0x20==RAM[point++]);
+				// Set the file name
+				for(i=0;i<12;i++) {
+					if ((g_ide_filename[i]=RAM[point++])<0x21) break;
+				}
+				g_ide_filename[i]=0;
+			// Check SWAPFILE
+			}
+		}
+		// Go to next line
+		while(point<end && 0x0a!=RAM[point++]);
+		// Skip blank line
+		while(point<end && 0x0a==RAM[point]) point++;
+	}
+}
+
 int main(void){
 	char ascii, cursorchar, blinktimer;
+	int i;
 
 	// Port initializations
 	CNPUB = 0xFFFF; // PORTB all pull up (I/O)
@@ -215,6 +290,10 @@ int main(void){
 
 	lockkey=2; // NumLock
 	keytype=0; // JP key board
+
+	// Read ini file
+	init_file();
+
 	printstr("Init PS/2...");
 	wait60thsec(30); 
 	if(ps2init()){ // Initialize PS/2
@@ -223,7 +302,33 @@ int main(void){
 		printstr("OK\n");
 	}
 
+	// Initilize peripheral
+	peripheral_init();
+
+	// Read ini file
+	init_file();
+
+	// Initialize IDE
+	ide_init();
+
+	// Initialize Z80
+	resetZ80();
+
+	// Main loop
+	while(1){
+		// Timer is not used for Fuzix emulator.
+		// Z80 CPU will work at the highest speed, that is ~2.5 MHz
+		execZ80infinite();
+	}
+
 	wait60thsec(60);
+
+	for(i=0x00;i<0x100;i++){
+		if (!(i&0x0f)) printchar('\n');
+		printhex8(i);
+		printchar(i);
+		printchar(' ');
+	}
 
 	// Non-blocking type example
 	while(1){

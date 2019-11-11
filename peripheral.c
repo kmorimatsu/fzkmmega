@@ -1,0 +1,337 @@
+/*
+   This file is provided under the LGPL license ver 2.1.
+   Written by Katsumi.
+   https://github.com/kmorimatsu/
+*/
+
+#include <xc.h>
+#include <sys/attribs.h>
+#include "z80.h"
+#include "api.h"
+#include "peripheral.h"
+#include "monitor.h"
+#include "main.h"
+
+#define printchar(c,t) printchar_cur(c,t)
+#define printstr(c,t) printstr_cur(c,t)
+#define printhex8(c,d) printhex8_cur(c,d)
+#define printhex16(c,d) printhex32_cur(c,d)
+#define printhex32(c,d) printhex16_cur(c,d)
+
+#define VIDEOHEIGHT 27
+#define VRAM TVRAM
+
+unsigned char RAM[65536];
+
+int g_cursor;
+unsigned char g_cursorchar;
+unsigned char g_blinktimer;
+unsigned char g_cpmkeybuff[8];
+unsigned char g_cpmkeybuffwrite;
+unsigned char g_cpmkeybuffread;
+
+unsigned char g_timer8;
+unsigned short g_timer8count;
+unsigned char g_ram_rom;
+unsigned char g_rom_a14;
+unsigned char g_rom_a15;
+
+void peripheral_init(void){
+	// Clear latch etc
+	g_timer8=0;
+	g_timer8count=0;
+	g_ram_rom=0;
+	g_rom_a14=0;
+	g_rom_a15=0;
+	// Clear cursor
+	g_cursor=(int)(&cursor[0])-(int)(&VRAM[0]);
+	g_cursorchar=VRAM[g_cursor];
+	g_blinktimer=0;
+	// Initialize key
+	g_cpmkeybuffwrite=0;
+	g_cpmkeybuffread=0;
+	// Enable software intterupt for key
+	IPC0bits.CS0IP=3;
+	IPC0bits.CS0IS=0;
+	IFS0bits.CS0IF=0;
+	IEC0bits.CS0IE=1;
+}
+
+UINT8 readMemory(UINT16 addr){
+	if (0x4000<=addr || g_ram_rom) {
+		return RAM[addr];
+	} else {
+		if (g_rom_a14) addr+=0x4000;
+		if (g_rom_a15) addr+=0x8000;
+		return monitor[addr];
+	}
+}
+// See macro in peripheral.h for writeMemory()
+
+UINT8 readIO(UINT8 addrL, UINT8 addrH){
+	UINT8 ret;
+	if (0x00<=addrL && addrL<=0x07) {
+		// SIO
+		switch(addrL&0x03){
+			case 0x00:
+			case 0x01:
+				//ret=io.keypress;
+				//io.keypress=0;
+				if (cpm_const()) {
+					return cpm_conin();
+				} else {
+					return 0;
+				}
+			case 0x02:
+			case 0x03:
+				if (g_timer8count) {
+					g_timer8count--;
+					g_timer8=g_timer8 ? 0:1;
+				}
+				return 0x06|(cpm_const() ? 1:0)|(g_timer8 ? 8:0);
+			default:
+				break;
+		}
+	} else if (0x10<=addrL && addrL<=0x17) {
+		// IDE
+		return ide_read(addrL&7);
+	} else if (0x38<=addrL && addrL<=0x3F) {
+		// Latch
+	}
+	return 0;
+}
+void writeIO(UINT8 addrL, UINT8 addrH, UINT8 data){
+	if (0x00<=addrL && addrL<=0x07) {
+		// SIO
+		switch(addrL&0x03){
+			case 0x00:
+				// SIOA_D
+			case 0x01:
+				// SIOB_D
+				cpm_conout(data);
+				break;
+		}
+	} else if (0x10<=addrL && addrL<=0x17) {
+		// IDE
+		ide_write(addrL&7,data);
+	} else if (0x38<=addrL && addrL<=0x3F) {
+		// Latch
+		switch(addrL){
+			case 0x38:
+				g_ram_rom=data&1;
+				break;
+			case 0x3E:
+				g_rom_a15=data&1;
+				break;
+			case 0x3F:
+				g_rom_a14=data&1;
+				break;
+		}
+	}
+}
+
+void cpm_conout(unsigned char ascii){
+	// Restore cursor
+	if (g_blinktimer<30) {
+		printchar(g_cursor,g_cursorchar);
+	}
+	g_blinktimer=30;
+	switch(ascii){
+		case 0x00: // null
+		case 0x02: // ^B
+		case 0x03: // ^C
+		case 0x04: // ^D
+		case 0x05: // ^E
+		case 0x0c: // ^L
+		case 0x0e: // ^N
+		case 0x0f: // ^O
+		case 0x10: // ^P
+		case 0x11: // ^Q
+		case 0x12: // ^R
+		case 0x13: // ^S
+		case 0x14: // ^T
+		case 0x15: // ^U
+		case 0x16: // ^V
+		case 0x17: // ^W
+		case 0x19: // ^Y
+			break;
+		case 0x01: // ^A
+			g_cursor--;
+			if (g_cursor<0) g_cursor=0;
+			break;
+		case 0x06: // ^F
+			g_cursor++;
+			if (80*24<=g_cursor) g_cursor=80*24-1;
+			break;
+		case 0x07: // ^G (BEL)
+//			g_beep=1;
+			wait_msec(500);
+			printchar(g_cursor,g_cursorchar);
+//			g_beep=0;
+			break;
+		case 0x09: // ^I (TAB)
+			if ((g_cursor%80)<70) {
+				g_cursor+=10-(g_cursor%10);
+			}
+			break;
+		case 0x08: // ^H (BS)
+			g_cursor--;
+			if (g_cursor<0) g_cursor=0;
+			printchar(g_cursor,0x20);
+			break;
+		case 0x0a: // (^J) LF
+			g_cursor+=80;
+			break;
+		case 0x0b: // ^K
+			/*for(var i=g_cursor;i<parseInt(g_cursor/80)*80+80;i++){
+				this.write(i,0x20);
+			}*/
+			if (80<=g_cursor) g_cursor-=80;
+			break;
+		case 0x0d: // ^M (CR)
+			g_cursor=g_cursor/80;
+			g_cursor=g_cursor*80;
+			break;
+		case 0x18: // ^X
+/*			for(var i=i<parseInt(g_cursor/80)*80;i<g_cursor;i++){
+				this.write(i,0x20);
+			}
+			g_cursor=1+g_cursor/80;
+			g_cursor=g_cursor*80;
+*/
+			break;
+		case 0x7f: // DEL
+			break;
+		case 0x1a: // ^Z
+			clearscreen();
+			g_cursor=0;
+			break;
+		case 0x1c: // ^\
+			g_cursor++;
+			break;
+		case 0x1d: // ^]
+			if (0<g_cursor) g_cursor--;
+			break;
+		case 0x1e: // ^^
+			g_cursor=0;
+			break;
+		default:
+			printchar(g_cursor,ascii);
+			g_cursor++;
+			break;
+	}
+	// Check if scroll up is needed.
+	if (80*VIDEOHEIGHT<=g_cursor) {
+		vertical_scroll();
+		g_cursor-=80;
+	}
+	// Update cursor
+	g_cursorchar=VRAM[g_cursor];
+	g_blinktimer=58;
+}
+
+int cpm_const(void){
+	return (g_cpmkeybuffread!=g_cpmkeybuffwrite);
+}
+unsigned char cpm_conin(void){
+	unsigned char ret;
+	ret=g_cpmkeybuff[g_cpmkeybuffread++];
+	g_cpmkeybuffread&=7;
+	return ret;
+}
+
+void __ISR(_CORE_SOFTWARE_0_VECTOR,IPL3SOFT) CS0Hanlder(void){
+	// This function is called at ~60 Hz frequency 
+	static unsigned char s_prevchar=0;
+	static int s_next8=0;
+	unsigned char curchar;
+	// Drop flag
+	IFS0bits.CS0IF=0;
+	// Read key
+	curchar=ps2readkey();
+	if (vkey) {
+		if (!curchar) {
+			curchar=vkey&0xff;
+			if (curchar&0xe0) curchar=0;
+			if (curchar==0x0d) curchar=0x0a;
+		}
+		// Update buffer if key is just pressed
+		if (s_prevchar!=curchar && curchar) {
+			g_cpmkeybuff[g_cpmkeybuffwrite++]=curchar;
+			g_cpmkeybuffwrite&=7;
+			// Interrupt
+			intZ80(0xE0);
+		}
+	}
+	// Update static data
+	s_prevchar=curchar;
+	// Blink cursor
+	g_blinktimer++;
+	if (59<g_blinktimer) {
+		g_blinktimer=0;
+		printchar(g_cursor,0x87);
+	} else if (30==g_blinktimer) {
+		printchar(g_cursor,g_cursorchar);
+	}
+	// Produce 8 hz square wave here
+	// To do this, check core timer (47727267 Hz) for 16 hz, 
+	// and invert flag with this frequency
+	if ((int)(s_next8-coretimer())<0) {
+		s_next8+=47727267/16;
+		if (g_timer8count<0xffff) g_timer8count++;
+	}
+	if (g_timer8count) {
+		// Interrupt
+		intZ80(0xE0);
+	}
+}
+
+/*
+	Wrappers for KM-Z80 midi functions follow
+*/
+
+#undef printchar
+#undef printstr
+#undef printhex8
+#undef printhex16
+#undef printhex32
+
+void printchar_cur(int cur,char c){
+	while(80*VIDEOHEIGHT<=cur) cur-=240;
+	setcursor(cur%80,cur/80,7);
+	printchar(c);
+}
+
+void printstr_cur(int cur,char* str){
+	while(80*VIDEOHEIGHT<=cur) cur-=240;
+	setcursor(cur%80,cur/80,7);
+	printstr(str);
+}
+
+void printhex8_cur(int cur,unsigned char d){
+	while(80*VIDEOHEIGHT<=cur) cur-=240;
+	setcursor(cur%80,cur/80,7);
+	printhex8(d);
+}
+
+void printhex16_cur(int cur,unsigned short d){
+	while(80*VIDEOHEIGHT<=cur) cur-=240;
+	setcursor(cur%80,cur/80,7);
+	printhex16(d);
+}
+
+void printhex32_cur(int cur,unsigned int d){
+	while(80*VIDEOHEIGHT<=cur) cur-=240;
+	setcursor(cur%80,cur/80,7);
+	printhex32(d);
+}
+
+void vertical_scroll(void){
+	int i;
+	for(i=0;i<20*(VIDEOHEIGHT-1);i++){
+		((unsigned int*)VRAM)[i]=((unsigned int*)VRAM)[i+20];
+	}
+	for(i=i;i<20*VIDEOHEIGHT;i++){
+		((unsigned int*)VRAM)[i]=0x20202020;
+	}
+}

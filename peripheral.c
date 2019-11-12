@@ -19,10 +19,8 @@
 #define printhex32(c,d) printhex16_cur(c,d)
 
 #define VIDEOHEIGHT 27
-#define VRAM TVRAM
 
-unsigned char RAM[65536];
-
+unsigned char RAM[65536] __attribute__((persistent,address(0xA0010000)));
 int g_cursor;
 unsigned char g_cursorchar;
 unsigned char g_blinktimer;
@@ -44,8 +42,8 @@ void peripheral_init(void){
 	g_rom_a14=0;
 	g_rom_a15=0;
 	// Clear cursor
-	g_cursor=(int)(&cursor[0])-(int)(&VRAM[0]);
-	g_cursorchar=VRAM[g_cursor];
+	g_cursor=(int)(&cursor[0])-(int)(&TVRAM[0]);
+	g_cursorchar=TVRAM[g_cursor];
 	g_blinktimer=0;
 	// Initialize key
 	g_cpmkeybuffwrite=0;
@@ -226,7 +224,7 @@ void cpm_conout(unsigned char ascii){
 		g_cursor-=80;
 	}
 	// Update cursor
-	g_cursorchar=VRAM[g_cursor];
+	g_cursorchar=TVRAM[g_cursor];
 	g_blinktimer=58;
 }
 
@@ -329,9 +327,9 @@ void printhex32_cur(int cur,unsigned int d){
 void vertical_scroll(void){
 	int i;
 	for(i=0;i<20*(VIDEOHEIGHT-1);i++){
-		((unsigned int*)VRAM)[i]=((unsigned int*)VRAM)[i+20];
+		((unsigned int*)TVRAM)[i]=((unsigned int*)TVRAM)[i+20];
 	}
 	for(i=i;i<20*VIDEOHEIGHT;i++){
-		((unsigned int*)VRAM)[i]=0x20202020;
+		((unsigned int*)TVRAM)[i]=0x20202020;
 	}
 }

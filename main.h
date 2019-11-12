@@ -15,3 +15,6 @@ extern char g_ide_filename[13];
 void printhex8(unsigned char d);
 void printhex16(unsigned short d);
 void printhex32(unsigned int d);
+int coretimer(void);
+void wait_msec(int msec);
+void wait60thsec(unsigned short n);

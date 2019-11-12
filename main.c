@@ -210,7 +210,7 @@ void init_file(void){
 	while(point<end){
 		// Check if comment
 		if ('#'!=RAM[point]) {
-			// Check CAPSLOCK
+			// Check NUMLOCK
 			if (c=nextIs("NUMLOCK ",point)) {
 				point+=c;
 				if (c=nextIs("ON",point)) {
@@ -224,13 +224,22 @@ void init_file(void){
 			} else if (c=nextIs("DISKFILE ",point)) {
 				point+=c;
 				// Skip blank
-				while(point<end && 0x20==RAM[point++]);
+				while(point<end && 0x20==RAM[point]) point++;
 				// Set the file name
 				for(i=0;i<12;i++) {
 					if ((g_ide_filename[i]=RAM[point++])<0x21) break;
 				}
 				g_ide_filename[i]=0;
-			// Check SWAPFILE
+			// Check KEYBOARD
+			} else if (c=nextIs("KEYBOARD ",point)) {
+				point+=c;
+				if (c=nextIs("106",point)) {
+					point+=c;
+					keytype=0; // JP keyboard
+				} else if (c=nextIs("101",point)) {
+					point+=c;
+					keytype=1; // US keyboard
+				}
 			}
 		}
 		// Go to next line
@@ -305,9 +314,6 @@ int main(void){
 	// Initilize peripheral
 	peripheral_init();
 
-	// Read ini file
-	init_file();
-
 	// Initialize IDE
 	ide_init();
 
@@ -317,54 +323,7 @@ int main(void){
 	// Main loop
 	while(1){
 		// Timer is not used for Fuzix emulator.
-		// Z80 CPU will work at the highest speed, that is ~2.5 MHz
+		// Z80 CPU will work at the highest speed, that is ~2.3 MHz
 		execZ80infinite();
-	}
-
-	wait60thsec(60);
-
-	for(i=0x00;i<0x100;i++){
-		if (!(i&0x0f)) printchar('\n');
-		printhex8(i);
-		printchar(i);
-		printchar(' ');
-	}
-
-	// Non-blocking type example
-	while(1){
-		cursorchar=cursor[0];
-		blinktimer=0;
-		do {
-			switch (blinktimer++){
-				case 40:
-					blinktimer=1;
-				case 0:
-					cursor[0]='_';
-					break;
-				case 20:
-					cursor[0]=cursorchar;
-					break;
-			}
-			wait60thsec(1); // 60 Hz wait
-			ascii=ps2readkey();
-		} while(!vkey);
-		cursor[0]=cursorchar;
-		if (!ascii) {
-			ascii=vkey&0xff;
-			if (ascii&0xe0) ascii=0;
-			if (ascii==0x0d) ascii=0x0a;
-		}
-		if (ascii) printchar(ascii);
-	}
-
-	// Blocking type example
-	while(1){
-		ascii=cursorinputchar();
-		if (!ascii) {
-			ascii=vkey&0xff;
-			if (ascii&0xe0) ascii=0;
-			if (ascii==0x0d) ascii=0x0a;
-		}
-		if (ascii) printchar(ascii);
 	}
 }

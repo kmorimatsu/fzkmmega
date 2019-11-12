@@ -114,7 +114,7 @@ file_017=interface\sdfsio370fLib.X.a
 file_018=interface\lib_videoout_megalopa.X.a
 file_019=interface\ps2keyboard370f.X.a
 file_020=app_p32MX370F512H.ld
-file_021=help.txt
+file_021=fzkmmega.ini
 [SUITE_INFO]
 suite_guid={62D235D8-2DB2-49CD-AF24-5489A6015337}
 suite_state=

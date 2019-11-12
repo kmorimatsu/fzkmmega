@@ -248,10 +248,15 @@ void __ISR(_CORE_SOFTWARE_0_VECTOR,IPL3SOFT) CS0Hanlder(void){
 	// Read key
 	curchar=ps2readkey();
 	if (vkey) {
+		// Detect ENTER key etc
 		if (!curchar) {
 			curchar=vkey&0xff;
 			if (curchar&0xe0) curchar=0;
 			if (curchar==0x0d) curchar=0x0a;
+		}
+		// Check CTRL key
+		if (vkey&0x0200) {
+			curchar=vkey&0x1f;
 		}
 		// Update buffer if key is just pressed
 		if (s_prevchar!=curchar && curchar) {

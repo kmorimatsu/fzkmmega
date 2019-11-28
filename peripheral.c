@@ -34,6 +34,8 @@ unsigned char g_ram_rom;
 unsigned char g_rom_a14;
 unsigned char g_rom_a15;
 
+unsigned int g_sfrvalue;
+
 void peripheral_init(void){
 	// Clear latch etc
 	g_timer8=0;
@@ -68,6 +70,7 @@ UINT8 readMemory(UINT16 addr){
 
 UINT8 readIO(UINT8 addrL, UINT8 addrH){
 	UINT8 ret;
+	unsigned int sfraddr;
 	if (0x00<=addrL && addrL<=0x07) {
 		// SIO
 		switch(addrL&0x03){
@@ -95,10 +98,38 @@ UINT8 readIO(UINT8 addrL, UINT8 addrH){
 		return ide_read(addrL&7);
 	} else if (0x38<=addrL && addrL<=0x3F) {
 		// Latch
+	} else if (0x40<=addrL && addrL<=0x43) {
+		// PIC32MX SFR bits 8-15, 16-23, and 24-31
+		switch(addrL){
+			case 0x41:
+				return (g_sfrvalue>>8)&0xff;
+			case 0x42:
+				return (g_sfrvalue>>16)&0xff;
+			case 0x43:
+				return (g_sfrvalue>>24)&0xff;
+			case 0x40:
+			default:
+				// Reserved 
+				break;
+		}
+	} else if (0x80<=addrL) {
+		// PIC32MX SFR
+		// Calculation of SFR address from Z80 I/O address (as B and C registers) is done as follows:
+		// 0xBF800000 | ((C&0x40)<<13 | (B<<8) | ((C&0x3f)<<2)
+		sfraddr=addrL&0x40;
+		sfraddr<<=5;
+		sfraddr|=addrH;
+		sfraddr<<=6;
+		sfraddr|=addrL&0x3f;
+		sfraddr<<=2;
+		sfraddr|=0xBF800000;
+		g_sfrvalue=((volatile unsigned int*)sfraddr)[0];
+		return g_sfrvalue&0xff;
 	}
 	return 0;
 }
 void writeIO(UINT8 addrL, UINT8 addrH, UINT8 data){
+	unsigned int sfraddr;
 	if (0x00<=addrL && addrL<=0x07) {
 		// SIO
 		switch(addrL&0x03){
@@ -125,6 +156,40 @@ void writeIO(UINT8 addrL, UINT8 addrH, UINT8 data){
 				g_rom_a14=data&1;
 				break;
 		}
+	} else if (0x40<=addrL && addrL<=0x43) {
+		// PIC32MX SFR bits 8-15, 16-23, and 24-31
+		switch(addrL){
+			case 0x41:
+				g_sfrvalue&=0xffff0000;
+				g_sfrvalue|=(unsigned int)data<<8;
+				break;
+			case 0x42:
+				g_sfrvalue&=0xff00ff00;
+				g_sfrvalue|=(unsigned int)data<<16;
+				break;
+			case 0x43:
+				g_sfrvalue&=0x00ffff00;
+				g_sfrvalue|=(unsigned int)data<<24;
+				break;
+			case 0x40:
+			default:
+				// Reserved
+				break;
+		}
+	} else if (0x80<=addrL) {
+		// PIC32MX SFR
+		// Calculation of SFR address from Z80 I/O address (as B and C registers) is done as follows:
+		// 0xBF800000 | ((C&0x40)<<13 | (B<<8) | ((C&0x3f)<<2)
+		sfraddr=addrL&0x40;
+		sfraddr<<=5;
+		sfraddr|=addrH;
+		sfraddr<<=6;
+		sfraddr|=addrL&0x3f;
+		sfraddr<<=2;
+		sfraddr|=0xBF800000;
+		g_sfrvalue&=0xffffff00;
+		g_sfrvalue|=data;
+		((volatile unsigned int*)sfraddr)[0]=g_sfrvalue;
 	}
 }
 

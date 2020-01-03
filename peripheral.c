@@ -12,7 +12,6 @@
 #include "monitor.h"
 #include "main.h"
 
-#define printchar(c,t) printchar_cur(c,t)
 #define printstr(c,t) printstr_cur(c,t)
 #define printhex8(c,d) printhex8_cur(c,d)
 #define printhex16(c,d) printhex32_cur(c,d)
@@ -21,7 +20,6 @@
 #define VIDEOHEIGHT 27
 
 unsigned char RAM[65536] __attribute__((persistent,address(0xA0010000)));
-int g_cursor;
 unsigned char g_cursorchar;
 unsigned char g_blinktimer;
 unsigned char g_cpmkeybuff[8];
@@ -44,8 +42,7 @@ void peripheral_init(void){
 	g_rom_a14=0;
 	g_rom_a15=0;
 	// Clear cursor
-	g_cursor=(int)(&cursor[0])-(int)(&TVRAM[0]);
-	g_cursorchar=TVRAM[g_cursor];
+	g_cursorchar=cursor[0];
 	g_blinktimer=0;
 	// Initialize key
 	g_cpmkeybuffwrite=0;
@@ -194,9 +191,10 @@ void writeIO(UINT8 addrL, UINT8 addrH, UINT8 data){
 }
 
 void cpm_conout(unsigned char ascii){
+	int i;
 	// Restore cursor
 	if (g_blinktimer<30) {
-		printchar(g_cursor,g_cursorchar);
+		cursor[0]=g_cursorchar;
 	}
 	g_blinktimer=30;
 	switch(ascii){
@@ -219,41 +217,62 @@ void cpm_conout(unsigned char ascii){
 		case 0x19: // ^Y
 			break;
 		case 0x01: // ^A
-			g_cursor--;
-			if (g_cursor<0) g_cursor=0;
+			if (&TVRAM[0]<cursor) cursor--;
+//			g_cursor--;
+//			if (g_cursor<0) g_cursor=0;
 			break;
 		case 0x06: // ^F
-			g_cursor++;
-			if (80*24<=g_cursor) g_cursor=80*24-1;
+			if (cursor<&TVRAM[twidth*twidthy-1]) cursor++;
+//			g_cursor++;
+//			if (80*24<=g_cursor) g_cursor=80*24-1;
 			break;
 		case 0x07: // ^G (BEL)
 //			g_beep=1;
 			wait_msec(500);
-			printchar(g_cursor,g_cursorchar);
+			cursor[0]=g_cursorchar;
 //			g_beep=0;
 			break;
 		case 0x09: // ^I (TAB)
-			if ((g_cursor%80)<70) {
-				g_cursor+=10-(g_cursor%10);
+			i=cursor-&TVRAM[0];
+			switch(twidth){
+				case 30:
+					if ((i%30)<20) i+=10-(i%10);
+					break;
+				case 36:
+					if ((i%36)<27) i+=9-(i%9);
+					break;
+				case 40:
+					if ((i%40)<30) i+=10-(i%10);
+					break;
+				case 48:
+					if ((i%48)<40) i+=8-(i%8);
+					break;
+				case 64:
+					if ((i%64)<56) i+=8-(i%8);
+					break;
+				case 80:
+				default:
+					if ((i%80)<70) i+=10-(i%10);
+					break;
 			}
+			cursor=&TVRAM[i];
 			break;
 		case 0x08: // ^H (BS)
-			g_cursor--;
-			if (g_cursor<0) g_cursor=0;
-			printchar(g_cursor,0x20);
+			if (&TVRAM[0]<cursor) {
+				cursor--;
+				cursor[0]=0x20;
+			}
 			break;
 		case 0x0a: // (^J) LF
-			g_cursor+=80;
+			printchar('\n');
 			break;
 		case 0x0b: // ^K
-			/*for(var i=g_cursor;i<parseInt(g_cursor/80)*80+80;i++){
-				this.write(i,0x20);
-			}*/
-			if (80<=g_cursor) g_cursor-=80;
+			if (&TVRAM[twidth]<=cursor) cursor-=twidth;
 			break;
 		case 0x0d: // ^M (CR)
-			g_cursor=g_cursor/80;
-			g_cursor=g_cursor*80;
+			i=cursor-&TVRAM[0];
+			i-=i%twidth;
+			cursor=&TVRAM[i];
 			break;
 		case 0x18: // ^X
 /*			for(var i=i<parseInt(g_cursor/80)*80;i<g_cursor;i++){
@@ -267,29 +286,23 @@ void cpm_conout(unsigned char ascii){
 			break;
 		case 0x1a: // ^Z
 			clearscreen();
-			g_cursor=0;
+			cursor=&TVRAM[0];
 			break;
 		case 0x1c: // ^\
-			g_cursor++;
+			printchar(g_cursorchar);
 			break;
 		case 0x1d: // ^]
-			if (0<g_cursor) g_cursor--;
+			if (&TVRAM[0]<cursor) cursor--;
 			break;
 		case 0x1e: // ^^
-			g_cursor=0;
+			cursor=&TVRAM[0];
 			break;
 		default:
-			printchar(g_cursor,ascii);
-			g_cursor++;
+			printchar(ascii);
 			break;
 	}
-	// Check if scroll up is needed.
-	if (80*VIDEOHEIGHT<=g_cursor) {
-		vertical_scroll();
-		g_cursor-=80;
-	}
 	// Update cursor
-	g_cursorchar=TVRAM[g_cursor];
+	g_cursorchar=cursor[0];
 	g_blinktimer=58;
 }
 
@@ -337,9 +350,9 @@ void __ISR(_CORE_SOFTWARE_0_VECTOR,IPL3SOFT) CS0Hanlder(void){
 	g_blinktimer++;
 	if (59<g_blinktimer) {
 		g_blinktimer=0;
-		printchar(g_cursor,0x87);
+		cursor[0]=0x87;
 	} else if (30==g_blinktimer) {
-		printchar(g_cursor,g_cursorchar);
+		cursor[0]=g_cursorchar;
 	}
 	// Produce 8 hz square wave here
 	// To do this, check core timer (47727267 Hz) for 16 hz, 

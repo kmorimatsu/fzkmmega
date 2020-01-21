@@ -12,15 +12,15 @@
 #include "monitor.h"
 #include "main.h"
 
-#define printstr(c,t) printstr_cur(c,t)
-#define printhex8(c,d) printhex8_cur(c,d)
-#define printhex16(c,d) printhex32_cur(c,d)
-#define printhex32(c,d) printhex16_cur(c,d)
+//#define printstr(c,t) printstr_cur(c,t)
+//#define printhex8(c,d) printhex8_cur(c,d)
+//#define printhex16(c,d) printhex32_cur(c,d)
+//#define printhex32(c,d) printhex16_cur(c,d)
 
 #define VIDEOHEIGHT 27
 
 unsigned char RAM[65536] __attribute__((persistent,address(0xA0010000)));
-unsigned char g_cursorchar;
+unsigned char g_cursorchar,g_cursorcolor;
 unsigned char g_blinktimer;
 unsigned char g_cpmkeybuff[8];
 unsigned char g_cpmkeybuffwrite;
@@ -34,6 +34,17 @@ unsigned char g_rom_a15;
 
 unsigned int g_sfrvalue;
 
+unsigned int g_picparamwords[8];
+unsigned char* g_picparambytes=(unsigned char*)&g_picparamwords[0];
+
+#define set_cursor(a,b) do {\
+		if (cursor<&TVRAM[twidth*twidthy]) {\
+			cursor[0]=a;\
+			cursor[twidth*twidthy]=b;\
+		}\
+}while(0)	
+
+
 void peripheral_init(void){
 	// Clear latch etc
 	g_timer8=0;
@@ -43,6 +54,7 @@ void peripheral_init(void){
 	g_rom_a15=0;
 	// Clear cursor
 	g_cursorchar=cursor[0];
+	g_cursorcolor=cursor[twidth*twidthy];
 	g_blinktimer=0;
 	// Initialize key
 	g_cpmkeybuffwrite=0;
@@ -64,6 +76,67 @@ UINT8 readMemory(UINT16 addr){
 	}
 }
 // See macro in peripheral.h for writeMemory()
+
+void picinterface(unsigned char mode){
+	unsigned char* p=g_picparambytes;
+	unsigned short* pi=(unsigned short*)&g_picparambytes[0];
+	unsigned long* pl=(unsigned long*)&g_picparambytes[0];
+	unsigned int i;
+	switch(mode){
+		case 0x10: // void start_composite(void);
+			start_composite();
+			break;
+		case 0x11: // void stop_ compisite(void);
+			stop_composite();
+			break;
+		case 0x12: // void set_palette(unsigned char n,unsigned char b,unsigned char r,unsigned char g);
+			set_palette(p[0],p[1],p[2],p[3]);
+			break;
+		case 0x13: // set_bgcolor(unsigned char b,unsigned char r,unsigned char g);
+			set_bgcolor(p[0],p[1],p[2]);
+			break;
+		case 0x14: // void set_videomode(unsigned char m, unsigned char *gvram);
+			set_cursor(g_cursorchar,g_cursorcolor);
+			set_videomode(p[0],0);
+			g_cursorchar=cursor[0];
+			g_cursorcolor=cursor[twidth*twidthy];
+			break;
+		case 0x15: // void setcursor(unsigned char x,unsigned char y,unsigned char c);
+			setcursor(p[0],p[1],cursorcolor);
+			break;
+		case 0x16: // void setcursorcolor(unsigned char c);
+			setcursorcolor(p[0]);
+			break;
+		case 0x20: // FSFILE * FSfopen(const char * fileName, const char *mode);
+			// In Fuzix, FSfopen(const char * fileName, const char *mode, FSFILE* pstruct);
+			i=(unsigned int)FSfopen((const char*)&RAM[pi[0]],(const char*)&RAM[pi[1]]);
+			if (i) {
+				memcpy(&RAM[pi[2]],(void*)i,sizeof(FSFILE));
+				pi[0]=pi[2];
+			} else {
+				pi[0]=0;
+			}
+			break;
+		case 0x21: // int FSfclose(FSFILE *fo);
+			pi[0]=FSfclose((FSFILE*)&RAM[pi[0]]);
+			break;
+		case 0x22: // int FSfseek(FSFILE *stream, long offset, int whence);
+			// In Fuzix, FSfseek(FSFILE *stream, int whence, long offset); , where int is INT16, long is INT32 
+			pi[0]=FSfseek((FSFILE*)&RAM[pi[0]],pl[1],pi[1]);
+			break;
+		case 0x23: // int FSfeof( FSFILE * stream );
+			pi[0]=FSfeof((FSFILE*)&RAM[pi[0]]);
+			break;
+		case 0x24: // size_t FSfwrite(const void *data_to_write, size_t size, size_t n, FSFILE *stream);
+			pi[0]=FSfwrite((const void*)&RAM[pi[0]],pi[1],pi[2],(FSFILE*)&RAM[pi[3]]);
+			break;
+		case 0x25: // size_t FSfread(void *ptr, size_t size, size_t n, FSFILE *stream);
+			pi[0]=FSfread((void*)&RAM[pi[0]],pi[1],pi[2],(FSFILE*)&RAM[pi[3]]);
+			break;
+		default:
+			break;
+	}	
+}
 
 UINT8 readIO(UINT8 addrL, UINT8 addrH){
 	UINT8 ret;
@@ -108,6 +181,14 @@ UINT8 readIO(UINT8 addrL, UINT8 addrH){
 			default:
 				// Reserved 
 				break;
+		}
+	} else if (0x48==addrL) {
+		// Video/FileSystem interface
+		if (addrH<0x20) {
+			return g_picparambytes[addrH];
+		} else {
+			picinterface(addrH);
+			return g_picparambytes[0];
 		}
 	} else if (0x80<=addrL) {
 		// PIC32MX SFR
@@ -173,6 +254,14 @@ void writeIO(UINT8 addrL, UINT8 addrH, UINT8 data){
 				// Reserved
 				break;
 		}
+	} else if (0x48==addrL) {
+		// Video/FileSystem interface
+		if (addrH<0x10) {
+			g_picparambytes[addrH]=data;
+		} else {
+			g_picparambytes[0]=data;
+			picinterface(addrH);
+		}
 	} else if (0x80<=addrL) {
 		// PIC32MX SFR
 		// Calculation of SFR address from Z80 I/O address (as B and C registers) is done as follows:
@@ -194,7 +283,7 @@ void cpm_conout(unsigned char ascii){
 	int i;
 	// Restore cursor
 	if (g_blinktimer<30) {
-		cursor[0]=g_cursorchar;
+		set_cursor(g_cursorchar,g_cursorcolor);
 	}
 	g_blinktimer=30;
 	switch(ascii){
@@ -229,7 +318,7 @@ void cpm_conout(unsigned char ascii){
 		case 0x07: // ^G (BEL)
 //			g_beep=1;
 			wait_msec(500);
-			cursor[0]=g_cursorchar;
+			set_cursor(g_cursorchar,g_cursorcolor);
 //			g_beep=0;
 			break;
 		case 0x09: // ^I (TAB)
@@ -303,6 +392,7 @@ void cpm_conout(unsigned char ascii){
 	}
 	// Update cursor
 	g_cursorchar=cursor[0];
+	g_cursorcolor=cursor[twidth*twidthy];
 	g_blinktimer=58;
 }
 
@@ -350,9 +440,9 @@ void __ISR(_CORE_SOFTWARE_0_VECTOR,IPL3SOFT) CS0Hanlder(void){
 	g_blinktimer++;
 	if (59<g_blinktimer) {
 		g_blinktimer=0;
-		cursor[0]=0x87;
+		set_cursor(0x87,7);
 	} else if (30==g_blinktimer) {
-		cursor[0]=g_cursorchar;
+		set_cursor(g_cursorchar,g_cursorcolor);
 	}
 	// Produce 8 hz square wave here
 	// To do this, check core timer (47727267 Hz) for 16 hz, 

@@ -283,6 +283,8 @@ int main(void){
 	set_videomode(VMODE_MONOTEXT,0); // 80 characters mode
 	setcursor(0,0,7);
 
+	blue_screen();
+
 	printstr("MachiKania type M console\n");
 	printstr("NTSC 80 x 27 character display and PS/2 keyboard\n");
 	printstr("Copyright (c) 2015-2019 Kenken\n");

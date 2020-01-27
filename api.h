@@ -33,3 +33,4 @@
 #include "interface/lib_video_megalopa.h"
 #include "interface/ps2keyboard.h"
 #include "interface/sdfsio370f.h"
+#include "interface/exception.h"

@@ -50,4 +50,5 @@ void printstr_cur(int cur,char* str);
 void printhex8_cur(int cur,unsigned char d);
 void printhex16_cur(int cur,unsigned short d);
 void printhex32_cur(int cur,unsigned int d);
-extern unsigned char *cursor;void vertical_scroll(void);
+extern unsigned char *cursor;
+void vertical_scroll(void);

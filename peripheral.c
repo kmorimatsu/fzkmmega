@@ -37,6 +37,8 @@ unsigned int g_sfrvalue;
 unsigned int g_picparamwords[8];
 unsigned char* g_picparambytes=(unsigned char*)&g_picparamwords[0];
 
+FSFILE* g_stream;
+
 #define set_cursor(a,b) do {\
 		if (cursor<&TVRAM[twidth*twidthy]) {\
 			cursor[0]=a;\
@@ -81,7 +83,6 @@ void picinterface(unsigned char mode){
 	unsigned char* p=g_picparambytes;
 	unsigned short* pi=(unsigned short*)&g_picparambytes[0];
 	unsigned long* pl=(unsigned long*)&g_picparambytes[0];
-	unsigned int i;
 	switch(mode){
 		case 0x10: // void start_composite(void);
 			start_composite();
@@ -108,30 +109,36 @@ void picinterface(unsigned char mode){
 			setcursorcolor(p[0]);
 			break;
 		case 0x20: // FSFILE * FSfopen(const char * fileName, const char *mode);
-			// In Fuzix, FSfopen(const char * fileName, const char *mode, FSFILE* pstruct);
-			i=(unsigned int)FSfopen((const char*)&RAM[pi[0]],(const char*)&RAM[pi[1]]);
-			if (i) {
-				memcpy(&RAM[pi[2]],(void*)i,sizeof(FSFILE));
-				pi[0]=pi[2];
+			if (g_stream) {
+				// Only one stream is available for opening file outside Fuzix
+				// This is required because FSfclose might not be called in the previous usage,
+				// for example, when Ctrl-C was pressed during application execution.
+				FSfclose(g_stream);
+			}
+			g_stream=FSfopen((const char*)&RAM[pi[0]],(const char*)&RAM[pi[1]]);
+			if (g_stream) {
+				pi[0]=-1;
 			} else {
 				pi[0]=0;
 			}
 			break;
 		case 0x21: // int FSfclose(FSFILE *fo);
-			pi[0]=FSfclose((FSFILE*)&RAM[pi[0]]);
+			pi[0]=FSfclose(g_stream);
 			break;
 		case 0x22: // int FSfseek(FSFILE *stream, long offset, int whence);
-			// In Fuzix, FSfseek(FSFILE *stream, int whence, long offset); , where int is INT16, long is INT32 
-			pi[0]=FSfseek((FSFILE*)&RAM[pi[0]],pl[1],pi[1]);
+			pi[0]=FSfseek(g_stream,pl[1],pi[1]);
 			break;
 		case 0x23: // int FSfeof( FSFILE * stream );
-			pi[0]=FSfeof((FSFILE*)&RAM[pi[0]]);
+			pi[0]=FSfeof(g_stream);
 			break;
 		case 0x24: // size_t FSfwrite(const void *data_to_write, size_t size, size_t n, FSFILE *stream);
-			pi[0]=FSfwrite((const void*)&RAM[pi[0]],pi[1],pi[2],(FSFILE*)&RAM[pi[3]]);
+			pi[0]=FSfwrite((const void*)&RAM[pi[0]],pi[1],pi[2],g_stream);
 			break;
 		case 0x25: // size_t FSfread(void *ptr, size_t size, size_t n, FSFILE *stream);
-			pi[0]=FSfread((void*)&RAM[pi[0]],pi[1],pi[2],(FSFILE*)&RAM[pi[3]]);
+			pi[0]=FSfread((void*)&RAM[pi[0]],pi[1],pi[2],g_stream);
+			break;
+		case 0x26: // long FSftell(FSFILE *fo);
+			pl[0]=FSftell(g_stream);
 			break;
 		default:
 			break;

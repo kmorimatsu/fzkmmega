@@ -140,6 +140,9 @@ void picinterface(unsigned char mode){
 		case 0x26: // long FSftell(FSFILE *fo);
 			pl[0]=FSftell(g_stream);
 			break;
+		case 0x27: // file size;
+			pl[0]=g_stream->size;
+			break;
 		default:
 			break;
 	}	

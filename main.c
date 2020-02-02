@@ -240,6 +240,25 @@ void init_file(void){
 					point+=c;
 					keytype=1; // US keyboard
 				}
+			// Check WIDTH
+			} else if (c=nextIs("WIDTH ",point)) {
+				point+=c;
+				if (c=nextIs("30",point)) {
+					point+=c;
+					set_videomode(VMODE_T30,0);
+				} else if (c=nextIs("36",point)) {
+					point+=c;
+					set_videomode(VMODE_STDTEXT,0);
+				} else if (c=nextIs("40",point)) {
+					point+=c;
+					set_videomode(VMODE_T40,0);
+				} else if (c=nextIs("48",point)) {
+					point+=c;
+					set_videomode(VMODE_WIDETEXT,0);
+				} else if (c=nextIs("64",point)) {
+					point+=c;
+					set_videomode(VMODE_WIDETEXT6dot,0);
+				}
 			}
 		}
 		// Go to next line
@@ -288,7 +307,7 @@ int main(void){
 	printstr("MachiKania type M console\n");
 	printstr("NTSC 80 x 27 character display and PS/2 keyboard\n");
 	printstr("Copyright (c) 2015-2019 Kenken\n");
-	printstr("Copyright (c) 2016-2019 Katsumi\n");
+	printstr("Copyright (c) 2016-2020 Katsumi\n");
 	printstr("Init File System...");
 	// Initialize the File System
 	if(!FSInit()){ // Initialize file system
@@ -298,6 +317,7 @@ int main(void){
 		while(1) asm("wait");
 	}
 	printstr("OK\n");
+	wait60thsec(30); 
 
 	lockkey=2; // NumLock
 	keytype=0; // JP key board
